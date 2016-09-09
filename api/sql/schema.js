@@ -2,6 +2,7 @@ import { property, constant } from 'lodash';
 
 export const schema = [`
 type Comment {
+  id: Int!
   postedBy: User!
   createdAt: Float! # Actually a date
   content: String!

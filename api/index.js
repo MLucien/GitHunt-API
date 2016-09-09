@@ -2,18 +2,21 @@ import express from 'express';
 import session from 'express-session';
 import passport from 'passport';
 import { apolloExpress, graphiqlExpress } from 'apollo-server';
-import { makeExecutableSchema } from 'graphql-tools';
 import { Strategy as GitHubStrategy } from 'passport-github';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 import knex from './sql/connector';
+
+import { createServer } from 'http';
+import { Server } from 'subscriptions-transport-ws';
+import { subscriptionManager } from './subscriptions';
 
 const KnexSessionStore = require('connect-session-knex')(session);
 const store = new KnexSessionStore({
   knex,
 });
 
-import { schema, resolvers } from './schema';
+import schema from './schema';
 import { GitHubConnector } from './github/connector';
 import { Repositories, Users } from './github/models';
 import { Entries, Comments } from './sql/models';
@@ -24,6 +27,8 @@ let PORT = 3010;
 if (process.env.PORT) {
   PORT = parseInt(process.env.PORT, 10) + 100;
 }
+
+const WS_PORT = process.env.WS_PORT || 8080;
 
 const {
   GITHUB_CLIENT_ID,
@@ -59,11 +64,6 @@ app.get('/logout', (req, res) => {
   res.redirect('/');
 });
 
-const executableSchema = makeExecutableSchema({
-  typeDefs: schema,
-  resolvers,
-});
-
 app.use('/graphql', apolloExpress((req) => {
   // Get the query, the same way express-graphql does it
   // https://github.com/graphql/express-graphql/blob/3fa6e68582d6d933d37fa9e841da5d2aa39261cd/src/index.js#L257
@@ -92,7 +92,7 @@ app.use('/graphql', apolloExpress((req) => {
   });
 
   return {
-    schema: executableSchema,
+    schema,
     context: {
       user,
       Repositories: new Repositories({ connector: gitHubConnector }),
@@ -123,3 +123,38 @@ passport.use(new GitHubStrategy(gitHubStrategyOptions, (accessToken, refreshToke
 
 passport.serializeUser((user, cb) => cb(null, user));
 passport.deserializeUser((obj, cb) => cb(null, obj));
+
+// WebSocket server for subscriptions
+
+const httpServer = createServer((request, response) => {
+  response.writeHead(404);
+  response.end();
+});
+
+httpServer.listen(WS_PORT, () => console.log( // eslint-disable-line no-console
+  `Websocket Server is now running on http://localhost:${WS_PORT}`
+));
+
+const websocketServer = null;
+
+// TODO: clean up this API
+const server = new Server(
+  {
+    subscriptionManager,
+    onSubscribe: params => {
+      const gitHubConnector = new GitHubConnector({
+        clientId: GITHUB_CLIENT_ID,
+        clientSecret: GITHUB_CLIENT_SECRET,
+      });
+      return Object.assign({}, params, {
+        context: {
+          Repositories: new Repositories({ connector: gitHubConnector }),
+          Users: new Users({ connector: gitHubConnector }),
+          Entries: new Entries(),
+          Comments: new Comments(),
+        },
+      });
+    },
+  },
+  httpServer: websocketServer
+);

@@ -1,6 +1,9 @@
 import { merge } from 'lodash';
 import { schema as gitHubSchema, resolvers as gitHubResolvers } from './github/schema';
 import { schema as sqlSchema, resolvers as sqlResolvers } from './sql/schema';
+import { makeExecutableSchema } from 'graphql-tools';
+
+import { pubsub } from './subscriptions';
 
 const rootSchema = [`
 # To select the sort order of the feed
@@ -39,9 +42,15 @@ type Mutation {
   submitComment(repoFullName: String!, commentContent: String!): Comment
 }
 
+type Subscription {
+  # Subscription fires on every comment added
+  commentAdded(repoFullName: String!): Comment
+}
+
 schema {
   query: Query
   mutation: Mutation
+  subscription: Subscription
 }
 `];
 
@@ -89,9 +98,14 @@ const rootResolvers = {
             commentContent
           )
         ))
-        .then(([id]) => (
+        .then(([id]) =>
           context.Comments.getCommentById(id)
-        ));
+        )
+        .then(comment => {
+          // publish subscription notification
+          pubsub.publish('commentAdded', comment);
+          return comment;
+        });
     },
 
     vote(_, { repoFullName, type }, context) {
@@ -114,7 +128,15 @@ const rootResolvers = {
       ));
     },
   },
+  Subscription: {
+    commentAdded(comment) {
+      // the subscription payload is the comment.
+      return comment;
+    },
+  },
 };
 
-export const schema = [...rootSchema, ...gitHubSchema, ...sqlSchema];
-export const resolvers = merge(rootResolvers, gitHubResolvers, sqlResolvers);
+const schema = [...rootSchema, ...gitHubSchema, ...sqlSchema];
+const resolvers = merge(rootResolvers, gitHubResolvers, sqlResolvers);
+
+export default makeExecutableSchema({ typeDefs: schema, resolvers });
