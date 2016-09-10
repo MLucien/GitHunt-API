@@ -138,6 +138,7 @@ httpServer.listen(WS_PORT, () => console.log( // eslint-disable-line no-console
 const websocketServer = null;
 
 // TODO: clean up this API
+// eslint-disable-next-line no-unused-vars
 const server = new Server(
   {
     subscriptionManager,
@@ -156,5 +157,5 @@ const server = new Server(
       });
     },
   },
-  httpServer: websocketServer
+  websocketServer
 );
